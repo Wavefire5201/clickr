@@ -1,0 +1,15 @@
+[package]
+name = "clickr"
+version = "0.1.0"
+edition = "2024"
+description = "A fast, lightweight autoclicker for Linux Wayland with a TUI interface"
+license = "MIT"
+repository = "https://github.com/Wavefire5201/clickr"
+
+[dependencies]
+evdev = "0.12"
+nix = { version = "0.31", features = ["poll", "user"] }
+ratatui = "0.30"
+crossterm = "0.29"
+rand = "0.8"
+notify-rust = "4"
