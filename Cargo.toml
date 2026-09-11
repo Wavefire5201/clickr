@@ -5,6 +5,9 @@ edition = "2024"
 description = "A fast, lightweight autoclicker for Linux Wayland with a TUI interface"
 license = "MIT"
 repository = "https://github.com/Wavefire5201/clickr"
+readme = "README.md"
+keywords = ["wayland", "autoclicker", "uinput", "tui", "hyprland"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 evdev = "0.12"

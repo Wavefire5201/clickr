@@ -7,6 +7,29 @@ use std::sync::Arc;
 use std::thread;
 
 fn main() {
+    if let Some(arg) = std::env::args().nth(1) {
+        match arg.as_str() {
+            "--version" | "-V" => {
+                println!("clickr {}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            "--help" | "-h" => {
+                println!("clickr {}", env!("CARGO_PKG_VERSION"));
+                println!("{}", env!("CARGO_PKG_DESCRIPTION"));
+                println!();
+                println!("Usage: clickr [--version | --help]");
+                println!();
+                println!("Runs the TUI. Requires membership in the 'input' group.");
+                return;
+            }
+            other => {
+                eprintln!("clickr: unknown argument '{other}'");
+                eprintln!("Usage: clickr [--version | --help]");
+                std::process::exit(2);
+            }
+        }
+    }
+
     // Refuse to run as root or setuid — use input group instead
     if nix::unistd::geteuid().is_root() {
         eprintln!("Error: clickr should not be run as root or setuid.");
