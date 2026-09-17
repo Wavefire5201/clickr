@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use evdev::{Device, Key};
 use nix::poll::{PollFd, PollFlags, PollTimeout};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::io::{AsRawFd, BorrowedFd};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -9,6 +9,21 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const RESCAN_INTERVAL: Duration = Duration::from_secs(10);
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(600);
+
+/// Device names are hardware-supplied strings headed for the terminal; strip control characters.
+fn sanitize_name(raw: Option<&str>) -> String {
+    raw.unwrap_or("unknown")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(64)
+        .collect()
+}
+
+enum ListenOutcome {
+    Unopenable,
+    Ended,
+}
 
 /// Enumerate keyboards and print results. Call BEFORE starting the TUI
 /// so log output doesn't bleed into the alternate screen.
@@ -19,7 +34,7 @@ pub fn enumerate_keyboards() -> Vec<PathBuf> {
         if let Some(supported) = device.supported_keys()
             && supported.contains(Key::KEY_F6)
         {
-            let name = device.name().unwrap_or("unknown").to_string();
+            let name = sanitize_name(device.name());
             eprintln!("Hotkey: listening on {name} ({path:?})");
             paths.push(path);
         }
@@ -35,7 +50,7 @@ pub fn enumerate_keyboards() -> Vec<PathBuf> {
 
 /// Tracks all spawned listener threads so they can be joined on shutdown.
 pub struct HotkeyHandles {
-    handles: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    registry: Arc<Registry>,
     rescan_handle: Option<JoinHandle<()>>,
 }
 
@@ -46,35 +61,98 @@ impl HotkeyHandles {
             let _ = h.join();
         }
         // Then join all listener threads
-        let handles = self.handles.lock().expect("handles lock").drain(..).collect::<Vec<_>>();
+        let handles = self
+            .registry
+            .handles
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect::<Vec<_>>();
         for h in handles {
             let _ = h.join();
         }
     }
 }
 
+struct Registry {
+    handles: Mutex<Vec<JoinHandle<()>>>,
+    active: Mutex<HashSet<PathBuf>>,
+    /// (consecutive failures, earliest retry)
+    failed: Mutex<HashMap<PathBuf, (u32, Instant)>>,
+}
+
+impl Registry {
+    fn spawn_listener(self: &Arc<Self>, path: PathBuf, state: Arc<AppState>) {
+        self.active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.clone());
+        let reg = Arc::clone(self);
+        let handle = thread::spawn(move || {
+            let outcome = listen_device(&path, state);
+            match outcome {
+                ListenOutcome::Unopenable => {
+                    let mut failed = reg.failed.lock().unwrap_or_else(|e| e.into_inner());
+                    let attempts = failed.get(&path).map_or(0, |(n, _)| *n) + 1;
+                    let backoff = (RESCAN_INTERVAL * 2u32.saturating_pow(attempts.min(10)))
+                        .min(MAX_RETRY_BACKOFF);
+                    failed.insert(path.clone(), (attempts, Instant::now() + backoff));
+                }
+                ListenOutcome::Ended => {
+                    reg.failed
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&path);
+                }
+            }
+            // Free the path so a rescan can pick the device up again.
+            reg.active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&path);
+        });
+        let mut handles = self.handles.lock().unwrap_or_else(|e| e.into_inner());
+        // Dropping finished handles detaches them; otherwise the list grows on every hotplug.
+        handles.retain(|h| !h.is_finished());
+        handles.push(handle);
+    }
+
+    fn should_spawn(&self, path: &PathBuf) -> bool {
+        if self
+            .active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(path)
+        {
+            return false;
+        }
+        match self
+            .failed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(path)
+        {
+            Some((_, retry_at)) => Instant::now() >= *retry_at,
+            None => true,
+        }
+    }
+}
+
 /// Spawn listener threads for the given keyboard paths. Call AFTER TUI init.
 pub fn run(initial_paths: Vec<PathBuf>, state: Arc<AppState>) -> HotkeyHandles {
-    let handles: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
-    // Track active listener paths — listeners remove themselves on exit so rescan can retry
-    let active_paths: Arc<Mutex<HashSet<PathBuf>>> = Arc::new(Mutex::new(HashSet::new()));
+    let registry = Arc::new(Registry {
+        handles: Mutex::new(Vec::new()),
+        active: Mutex::new(HashSet::new()),
+        failed: Mutex::new(HashMap::new()),
+    });
 
-    for path in &initial_paths {
-        active_paths.lock().expect("active_paths lock").insert(path.clone());
-        let s = Arc::clone(&state);
-        let p = path.clone();
-        let ap = Arc::clone(&active_paths);
-        handles.lock().expect("handles lock").push(thread::spawn(move || {
-            listen_device(&p, s);
-            // Remove path so rescan can retry if device reappears
-            ap.lock().expect("active_paths lock").remove(&p);
-        }));
+    for path in initial_paths {
+        registry.spawn_listener(path, Arc::clone(&state));
     }
 
     // Periodic rescan for hotplugged keyboards
     let rescan_state = Arc::clone(&state);
-    let rescan_handles = Arc::clone(&handles);
-    let rescan_active = Arc::clone(&active_paths);
+    let rescan_registry = Arc::clone(&registry);
     let rescan_handle = thread::spawn(move || {
         let mut last_scan = Instant::now();
 
@@ -87,24 +165,15 @@ pub fn run(initial_paths: Vec<PathBuf>, state: Arc<AppState>) -> HotkeyHandles {
             last_scan = Instant::now();
 
             for (path, _) in find_keyboards() {
-                let already_active = rescan_active.lock().expect("active_paths lock").contains(&path);
-                if !already_active {
-                    rescan_active.lock().expect("active_paths lock").insert(path.clone());
-                    let s = Arc::clone(&rescan_state);
-                    let ap = Arc::clone(&rescan_active);
-                    let p = path.clone();
-                    let h = thread::spawn(move || {
-                        listen_device(&p, s);
-                        ap.lock().expect("active_paths lock").remove(&p);
-                    });
-                    rescan_handles.lock().expect("handles lock").push(h);
+                if rescan_registry.should_spawn(&path) {
+                    rescan_registry.spawn_listener(path, Arc::clone(&rescan_state));
                 }
             }
         }
     });
 
     HotkeyHandles {
-        handles,
+        registry,
         rescan_handle: Some(rescan_handle),
     }
 }
@@ -116,24 +185,23 @@ fn find_keyboards() -> Vec<(PathBuf, String)> {
         if let Some(supported) = device.supported_keys()
             && supported.contains(Key::KEY_F6)
         {
-            let name = device.name().unwrap_or("unknown").to_string();
-            keyboards.push((path, name));
+            keyboards.push((path, sanitize_name(device.name())));
         }
     }
 
     keyboards
 }
 
-fn listen_device(path: &PathBuf, state: Arc<AppState>) {
+fn listen_device(path: &PathBuf, state: Arc<AppState>) -> ListenOutcome {
     let Ok(mut device) = Device::open(path) else {
-        return;
+        return ListenOutcome::Unopenable;
     };
 
     let mut consecutive_errors = 0u32;
 
     loop {
         if state.should_quit() {
-            return;
+            return ListenOutcome::Ended;
         }
 
         // SAFETY: device owns the fd and outlives the BorrowedFd (scoped to this loop iteration)
@@ -146,7 +214,7 @@ fn listen_device(path: &PathBuf, state: Arc<AppState>) {
             Err(_) => {
                 consecutive_errors += 1;
                 if consecutive_errors >= 50 {
-                    return;
+                    return ListenOutcome::Ended;
                 }
                 continue;
             }
@@ -155,7 +223,7 @@ fn listen_device(path: &PathBuf, state: Arc<AppState>) {
         if let Some(revents) = poll_fds[0].revents() {
             // Device disconnected or errored — exit this listener
             if revents.intersects(PollFlags::POLLERR | PollFlags::POLLHUP | PollFlags::POLLNVAL) {
-                return;
+                return ListenOutcome::Ended;
             }
             if !revents.contains(PollFlags::POLLIN) {
                 continue;
@@ -169,7 +237,7 @@ fn listen_device(path: &PathBuf, state: Arc<AppState>) {
                 consecutive_errors = 0;
 
                 let hotkey_code = {
-                    let settings = state.settings.lock().expect("settings lock");
+                    let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
                     settings.hotkey().code
                 };
 
@@ -185,7 +253,7 @@ fn listen_device(path: &PathBuf, state: Arc<AppState>) {
             Err(_) => {
                 consecutive_errors += 1;
                 if consecutive_errors >= 50 {
-                    return;
+                    return ListenOutcome::Ended;
                 }
             }
         }

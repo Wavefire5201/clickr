@@ -32,7 +32,7 @@ pub fn run(state: Arc<AppState>) {
         }
 
         let (interval_ms, button, mode, jitter_enabled, jitter_ms) = {
-            let settings = state.settings.lock().expect("settings lock");
+            let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             (
                 settings.interval_ms(),
                 settings.button,
@@ -87,7 +87,7 @@ pub fn run(state: Arc<AppState>) {
                 state.increment_clicks();
                 // Stay held until deactivated, quit, or settings change
                 while state.is_active() && !state.should_quit() {
-                    let settings = state.settings.lock().expect("settings lock");
+                    let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
                     let changed = settings.button != button || settings.mode != mode;
                     drop(settings);
                     if changed {

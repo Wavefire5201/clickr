@@ -2,6 +2,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+/// Set by the signal handler; checked by `should_quit` so signals use the normal shutdown path.
+pub static SIGNAL_QUIT: AtomicBool = AtomicBool::new(false);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
@@ -60,13 +63,34 @@ pub struct HotkeyBinding {
 
 // linux/input-event-codes.h: F6=64, F7=65, F8=66, F9=67, F10=68, F11=87, F12=88
 pub const HOTKEY_OPTIONS: &[HotkeyBinding] = &[
-    HotkeyBinding { code: 64, label: "F6" },
-    HotkeyBinding { code: 65, label: "F7" },
-    HotkeyBinding { code: 66, label: "F8" },
-    HotkeyBinding { code: 67, label: "F9" },
-    HotkeyBinding { code: 68, label: "F10" },
-    HotkeyBinding { code: 87, label: "F11" },
-    HotkeyBinding { code: 88, label: "F12" },
+    HotkeyBinding {
+        code: 64,
+        label: "F6",
+    },
+    HotkeyBinding {
+        code: 65,
+        label: "F7",
+    },
+    HotkeyBinding {
+        code: 66,
+        label: "F8",
+    },
+    HotkeyBinding {
+        code: 67,
+        label: "F9",
+    },
+    HotkeyBinding {
+        code: 68,
+        label: "F10",
+    },
+    HotkeyBinding {
+        code: 87,
+        label: "F11",
+    },
+    HotkeyBinding {
+        code: 88,
+        label: "F12",
+    },
 ];
 
 pub struct AppState {
@@ -127,7 +151,7 @@ impl AppState {
         // Debounce: ignore toggles within 100ms (multiple keyboard devices
         // can report the same keypress nearly simultaneously)
         {
-            let mut last = self.last_toggle.lock().expect("last_toggle lock");
+            let mut last = self.last_toggle.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();
             if let Some(prev) = *last
                 && now.duration_since(prev).as_millis() < TOGGLE_DEBOUNCE_MS
@@ -185,6 +209,6 @@ impl AppState {
     }
 
     pub fn should_quit(&self) -> bool {
-        self.should_quit.load(Ordering::Acquire)
+        self.should_quit.load(Ordering::Acquire) || SIGNAL_QUIT.load(Ordering::Acquire)
     }
 }
