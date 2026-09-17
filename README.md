@@ -1,81 +1,72 @@
+<div align="center">
+
 # clickr
 
-A fast, lightweight autoclicker for Linux Wayland (Hyprland, Sway, etc.) with a TUI interface.
+**Autoclicker for Linux with a TUI and a global hotkey.**<br>
+Built for Wayland. Works on Hyprland, Sway, GNOME, KDE, X11, and everything else, because it drives a virtual mouse through the kernel instead of the display server.
 
-Uses kernel-level uinput to create a virtual mouse device — works on any Wayland compositor without special protocol support.
+[![Release](https://img.shields.io/github/v/release/Wavefire5201/clickr?logo=github)](https://github.com/Wavefire5201/clickr/releases/latest)
+[![crates.io](https://img.shields.io/crates/v/clickr?logo=rust)](https://crates.io/crates/clickr)
+[![AUR](https://img.shields.io/aur/version/clickr-git?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/clickr-git)
+[![CI](https://github.com/Wavefire5201/clickr/actions/workflows/ci.yml/badge.svg)](https://github.com/Wavefire5201/clickr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-## Requirements
+<img src="assets/demo.gif" alt="clickr demo" width="680">
 
-- Linux with uinput support
-- User must be in the `input` group (see Security below)
-- A notification daemon (dunst, mako, swaync) for toggle notifications
+</div>
 
-## Build
+- **Any compositor.** Clicks come from a uinput virtual mouse, so no Wayland protocol, portal, or XWayland is involved.
+- **Global hotkey.** F6 toggles from any window and keeps working when keyboards are unplugged or plugged in.
+- **Everything in the TUI.** Speed from 1 to 1000 CPS, mouse button, click, double, or hold mode, jitter, and the hotkey itself.
+
+## Install
 
 ```bash
-cargo build --release
+yay -S clickr-git           # Arch Linux (AUR)
+cargo install clickr        # crates.io, builds from source
+cargo binstall clickr       # crates.io, downloads the prebuilt binary
 ```
 
-Binary at `target/release/clickr`.
+Static binaries for x86_64 and aarch64 are attached to every [release](https://github.com/Wavefire5201/clickr/releases/latest) and run on any distribution. Or build from source with `cargo build --release`.
 
-## Usage
+## Setup
 
-```bash
-./target/release/clickr
-```
+clickr needs to be in the `input` group to read keyboards and create the virtual mouse. See [Security](#security) for what that grants.
 
-## Controls
-
-| Key | Action |
-|-----|--------|
-| **F6** | Toggle on/off (global hotkey — works outside TUI) |
-| **Space** | Toggle on/off (in TUI) |
-| **S** | Set CPS manually (type a number, Enter to confirm) |
-| **Up/Down** | Adjust clicks per second (1–1000) |
-| **B** | Cycle mouse button (left/right/middle) |
-| **M** | Cycle click mode (click/double/hold) |
-| **J** | Toggle jitter (randomized interval) |
-| **Left/Right** | Adjust jitter amount (±1–100ms) |
-| **H** | Cycle hotkey (F6–F12) |
-| **R** | Reset click counter |
-| **Q / Esc** | Quit |
-
-## Features
-
-- **Global hotkey** — toggle from any window via F6–F12, auto-detects hotplugged keyboards
-- **1–1000 CPS** — adaptive speed stepping with log-scale gauge
-- **Click modes** — single click, double click, hold
-- **Jitter** — random ±ms variance for human-like clicking
-- **Desktop notifications** — popup on toggle
-- **Wayland native** — uinput bypasses display server entirely
-- **Clean shutdown** — all buttons released on exit, threads joined
-
-## How it works
-
-Three threads:
-1. **TUI** (main) — renders interface, handles keyboard input
-2. **Clicker** — creates a virtual mouse via `/dev/uinput`, emits click events
-3. **Hotkey** — reads keyboard devices via evdev, detects toggle key, rescans for new devices
-
-The virtual mouse appears as real hardware to the kernel, so every compositor processes it natively.
-
-## Security
-
-**clickr requires membership in the `input` group.** This is a sensitive privilege — it grants:
-
-- **Read access** to `/dev/input/event*` — the hotkey listener reads raw keyboard events from all keyboards. This is the same level of access a keylogger would need.
-- **Write access** to `/dev/uinput` — the clicker creates a virtual mouse that can inject clicks into any application.
-
-This is inherent to how any Wayland autoclicker must work (Wayland blocks client-to-client input injection by design, so kernel-level access is the only option).
-
-**Mitigations built in:**
-- Refuses to run as root or setuid
-- Only reads F-key events for hotkey detection, does not log other keys
-- Virtual device is named `clickr virtual mouse` for easy identification
-- All buttons are force-released on shutdown
-
-**To set up:**
 ```bash
 sudo usermod -aG input $USER
 ```
-Log out and back in for the group change to take effect. Only grant this to users you trust with full input access.
+
+Log out and back in. A notification daemon such as dunst, mako, or swaync is optional and enables the toggle popup.
+
+## Usage
+
+Run `clickr`, then:
+
+| Key | Action |
+|-----|--------|
+| **F6** | Toggle on/off from any window |
+| **Space** | Toggle on/off in the TUI |
+| **Up/Down**, **S** | Adjust CPS, or type an exact value |
+| **B** | Mouse button: left, right, middle |
+| **M** | Mode: click, double, hold |
+| **J**, **Left/Right** | Jitter on/off and amount |
+| **H** | Hotkey: F6 to F12 |
+| **R** | Reset click counter |
+| **Q** | Quit |
+
+## Security
+
+Membership in the `input` group grants read and write access to every input device, keyboards included, plus write access to `/dev/uinput`. That is the same access a keylogger needs, and it is unavoidable: Wayland blocks input injection between clients by design, so kernel-level access is the only way an autoclicker can exist there. Only grant it to users you trust with full input access.
+
+clickr limits what it does with that access. It refuses to run as root, setuid, setgid, or with file capabilities. It reacts only to F-keys and never logs other keys, and it marks itself non-dumpable so other processes cannot read its memory or produce a core dump of it. Its device is named `clickr virtual mouse`, and every button is released on exit, which the kernel also guarantees if the process is killed.
+
+Packagers: install the binary with normal permissions and let users add themselves to `input`. Do not ship it setgid as a shortcut. clickr will refuse to start.
+
+## Packaging
+
+The `clickr-git` AUR package is maintained by [taxin-404](https://aur.archlinux.org/packages/clickr-git), who packaged clickr before it had a release. Thank you. A stable `clickr` package is planned. Flathub is not: a sandboxed app cannot open `/dev/uinput`. Packaging for another distribution? Open an issue and it will be linked here.
+
+## License
+
+[MIT](LICENSE)
