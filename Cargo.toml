@@ -12,7 +12,7 @@ categories = ["command-line-utilities"]
 exclude = ["assets/*", ".github/*"]
 
 [dependencies]
-evdev = "0.12"
+evdev = "0.13"
 nix = { version = "0.31", features = ["poll", "user", "signal"] }
 ratatui = "0.30"
 crossterm = "0.29"
