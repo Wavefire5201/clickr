@@ -1,8 +1,5 @@
-# Builds static release binaries and attaches them to a GitHub Release.
-#
-# Runs on every tag that looks like v1.2.3. Can also be run by hand from the
-# Actions tab (workflow_dispatch) to test the build without cutting a release;
-# a manual run uploads nothing.
+# Static release binaries, attached to a GitHub Release on tag push.
+# A manual run (workflow_dispatch) builds but publishes nothing.
 name: release
 
 on:
@@ -10,13 +7,18 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# The build job runs hundreds of crates' build scripts and must never hold a write token.
 permissions:
-  contents: write # needed to create the Release and upload assets
+  contents: read
 
 jobs:
   build:
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write # for build provenance attestation
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +28,9 @@ jobs:
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # keep the token out of .git/config during the build
 
       - name: Install Rust toolchain with musl target
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09
@@ -53,8 +57,13 @@ jobs:
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           ls -l dist
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/*.tar.gz
+
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.target }}
           path: |
@@ -67,9 +76,11 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release and upload assets
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
