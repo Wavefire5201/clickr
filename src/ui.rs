@@ -1,10 +1,10 @@
 use crate::app::{AppState, HOTKEY_OPTIONS};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Gauge, Paragraph};
-use ratatui::Frame;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +22,10 @@ pub fn run(state: Arc<AppState>) -> std::io::Result<()> {
     result
 }
 
-fn event_loop(terminal: &mut ratatui::DefaultTerminal, state: &Arc<AppState>) -> std::io::Result<()> {
+fn event_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    state: &Arc<AppState>,
+) -> std::io::Result<()> {
     let mut ui = UiState { cps_input: None };
 
     while !state.should_quit() {
@@ -32,6 +35,11 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, state: &Arc<AppState>) ->
             && let Event::Key(key) = event::read()?
         {
             if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            // Raw mode swallows SIGINT, so Ctrl+C arrives as a key event.
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                state.quit();
                 continue;
             }
             handle_key(key.code, state, &mut ui);
@@ -47,7 +55,7 @@ fn handle_key(code: KeyCode, state: &AppState, ui: &mut UiState) {
             KeyCode::Enter => {
                 if let Ok(val) = buf.parse::<u32>() {
                     let clamped = val.clamp(1, 1000);
-                    state.settings.lock().expect("settings lock").cps = clamped;
+                    state.settings.lock().unwrap_or_else(|e| e.into_inner()).cps = clamped;
                 }
                 ui.cps_input = None;
             }
@@ -74,41 +82,44 @@ fn handle_key(code: KeyCode, state: &AppState, ui: &mut UiState) {
             ui.cps_input = Some(String::new());
         }
         KeyCode::Up => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             if s.cps < 1000 {
                 s.cps = (s.cps + speed_step(s.cps)).min(1000);
             }
         }
         KeyCode::Down => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             if s.cps > 1 {
-                s.cps = s.cps.saturating_sub(speed_step(s.cps.saturating_sub(1))).max(1);
+                s.cps = s
+                    .cps
+                    .saturating_sub(speed_step(s.cps.saturating_sub(1)))
+                    .max(1);
             }
         }
         KeyCode::Char('b') | KeyCode::Char('B') => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             s.button = s.button.next();
         }
         KeyCode::Char('m') | KeyCode::Char('M') => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             s.mode = s.mode.next();
         }
         KeyCode::Char('j') | KeyCode::Char('J') => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             s.jitter_enabled = !s.jitter_enabled;
         }
         KeyCode::Char('h') | KeyCode::Char('H') => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             s.hotkey_index = (s.hotkey_index + 1) % HOTKEY_OPTIONS.len();
         }
         KeyCode::Right => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             if s.jitter_ms < 100 {
                 s.jitter_ms += 1;
             }
         }
         KeyCode::Left => {
-            let mut s = state.settings.lock().expect("settings lock");
+            let mut s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             if s.jitter_ms > 1 {
                 s.jitter_ms -= 1;
             }
@@ -160,10 +171,10 @@ fn render(frame: &mut Frame, state: &AppState, ui: &UiState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),  // status
-            Constraint::Length(3),  // gauge
-            Constraint::Length(6),  // settings
-            Constraint::Length(3),  // footer
+            Constraint::Length(4), // status
+            Constraint::Length(3), // gauge
+            Constraint::Length(6), // settings
+            Constraint::Length(3), // footer
         ])
         .split(area);
 
@@ -180,7 +191,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
     let (indicator, color) = if active {
         ("  ▶ CLICKING", Color::Green)
     } else {
-        ("  ■ IDLE", Color::DarkGray)
+        ("  ■ IDLE", Color::Gray)
     };
 
     let lines = vec![
@@ -192,20 +203,30 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
             Span::raw("  Clicks: "),
             Span::styled(
                 format_count(count),
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
             if count > 0 {
-                Span::styled("  [R]reset", Style::default().fg(Color::DarkGray))
+                Span::styled("  [R]eset", Style::default().fg(Color::Gray))
             } else {
                 Span::raw("")
             },
         ]),
     ];
 
-    let border_color = if active { Color::Green } else { Color::DarkGray };
+    let border_color = if active {
+        Color::Green
+    } else {
+        Color::DarkGray
+    };
     let block = Block::default()
         .title(" clickr ")
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
@@ -213,7 +234,7 @@ fn render_status(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_gauge(frame: &mut Frame, area: Rect, state: &AppState, ui: &UiState) {
-    let settings = state.settings.lock().expect("settings lock");
+    let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
     let cps = settings.cps;
     let ratio = (cps as f64).ln_1p() / (1000_f64).ln_1p();
 
@@ -236,28 +257,67 @@ fn render_gauge(frame: &mut Frame, area: Rect, state: &AppState, ui: &UiState) {
         " Speed [↑/↓/S] "
     };
 
-    let border_color = if ui.cps_input.is_some() {
-        Color::Yellow
+    let (title_color, border_color) = if ui.cps_input.is_some() {
+        (Color::Yellow, Color::Yellow)
     } else {
-        Color::DarkGray
+        (Color::Gray, Color::DarkGray)
     };
 
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color)),
-        )
-        .gauge_style(Style::default().fg(color))
-        .ratio(ratio.clamp(0.0, 1.0))
-        .label(label);
+    let ratio = ratio.clamp(0.0, 1.0);
+    let block = Block::default()
+        .title(title)
+        .title_style(Style::default().fg(title_color))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(area);
 
+    // Gauge draws its label in the terminal default colour over the fill, which is
+    // unreadable on dark themes. Overlay it ourselves in two tones instead.
+    let gauge = Gauge::default()
+        .block(block)
+        .gauge_style(Style::default().fg(color))
+        .ratio(ratio)
+        .label("");
     frame.render_widget(gauge, area);
+
+    if inner.is_empty() {
+        return;
+    }
+    let label_width = (label.chars().count() as u16).min(inner.width);
+    let label_x = inner.x + (inner.width - label_width) / 2;
+    let label_y = inner.y + inner.height / 2;
+    // Same rounding as Gauge (non-unicode mode) so the split lands on the fill edge.
+    let fill_end = inner.x + (f64::from(inner.width) * ratio).round() as u16;
+    let on_fill = fill_end.saturating_sub(label_x).min(label_width) as usize;
+
+    let (filled_part, empty_part) = {
+        let mut chars = label.chars();
+        let a: String = chars.by_ref().take(on_fill).collect();
+        let b: String = chars.take(label_width as usize - on_fill).collect();
+        (a, b)
+    };
+    let overlay = Line::from(vec![
+        // The fill is block glyphs in the foreground colour; under text it must become the background.
+        Span::styled(
+            filled_part,
+            Style::default()
+                .fg(Color::Black)
+                .bg(color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            empty_part,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    frame.render_widget(
+        Paragraph::new(overlay),
+        Rect::new(label_x, label_y, label_width, 1),
+    );
 }
 
 fn render_settings(frame: &mut Frame, area: Rect, state: &AppState) {
-    let settings = state.settings.lock().expect("settings lock");
+    let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
 
     let jitter_val = format!("±{}ms", settings.jitter_ms);
     let jitter_display = if settings.jitter_enabled {
@@ -280,6 +340,7 @@ fn render_settings(frame: &mut Frame, area: Rect, state: &AppState) {
 
     let block = Block::default()
         .title(" Settings ")
+        .title_style(Style::default().fg(Color::Gray))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
 
@@ -297,7 +358,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &AppState, ui: &UiState) 
         ])
     } else {
         let hotkey_label = {
-            let settings = state.settings.lock().expect("settings lock");
+            let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner());
             settings.hotkey().label
         };
 
@@ -340,20 +401,20 @@ fn setting_line<'a>(label: &'a str, value: &'a str, key: &'a str, color: Color) 
             format!("{value:<10}"),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!("[{key}]"), Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("[{key}]"), Style::default().fg(Color::Gray)),
     ])
 }
 
 fn jitter_line<'a>(value: &'a str, detail: &'a str, enabled: bool) -> Line<'a> {
-    let color = if enabled { Color::Green } else { Color::DarkGray };
+    let color = if enabled { Color::Green } else { Color::Gray };
     Line::from(vec![
         Span::raw("  Jitter   "),
         Span::styled(
             format!("{value:<10}"),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("[J ←/→]", Style::default().fg(Color::DarkGray)),
-        Span::styled(detail.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled("[J ←/→]", Style::default().fg(Color::Gray)),
+        Span::styled(detail.to_string(), Style::default().fg(Color::Gray)),
     ])
 }
 
