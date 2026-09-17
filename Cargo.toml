@@ -2,16 +2,18 @@
 name = "clickr"
 version = "0.1.0"
 edition = "2024"
-description = "A fast, lightweight autoclicker for Linux Wayland with a TUI interface"
+rust-version = "1.88"
+description = "Autoclicker for Wayland (Hyprland, Sway) with a TUI and a global hotkey. Works via uinput, no compositor support needed."
 license = "MIT"
 repository = "https://github.com/Wavefire5201/clickr"
 readme = "README.md"
 keywords = ["wayland", "autoclicker", "uinput", "tui", "hyprland"]
 categories = ["command-line-utilities"]
+exclude = ["assets/*", ".github/*"]
 
 [dependencies]
 evdev = "0.12"
-nix = { version = "0.31", features = ["poll", "user"] }
+nix = { version = "0.31", features = ["poll", "user", "signal"] }
 ratatui = "0.30"
 crossterm = "0.29"
 rand = "0.8"
