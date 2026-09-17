@@ -6,6 +6,8 @@ All notable changes to clickr are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-17
+
 ### Security
 - Refuse to start when setuid, setgid, or carrying file capabilities, not only when root.
 - Mark the process non-dumpable so other processes of the same user cannot read
@@ -41,5 +43,6 @@ First tagged release. Same code as the `clickr-git` AUR package at the time, plu
 - `--version` and `--help` flags.
 - Release workflow producing static musl binaries for x86_64 and aarch64 with sha256 files.
 
-[Unreleased]: https://github.com/Wavefire5201/clickr/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Wavefire5201/clickr/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Wavefire5201/clickr/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Wavefire5201/clickr/releases/tag/v0.1.0
