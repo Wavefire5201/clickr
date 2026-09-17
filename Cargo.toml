@@ -16,5 +16,5 @@ evdev = "0.12"
 nix = { version = "0.31", features = ["poll", "user", "signal"] }
 ratatui = "0.30"
 crossterm = "0.29"
-rand = "0.8"
+rand = "0.10"
 notify-rust = "4"
