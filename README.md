@@ -7,7 +7,7 @@ Built for Wayland. Works on Hyprland, Sway, GNOME, KDE, X11, and everything else
 
 [![Release](https://img.shields.io/github/v/release/Wavefire5201/clickr?logo=github)](https://github.com/Wavefire5201/clickr/releases/latest)
 [![crates.io](https://img.shields.io/crates/v/clickr?logo=rust)](https://crates.io/crates/clickr)
-[![AUR](https://img.shields.io/aur/version/clickr-git?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/clickr-git)
+[![AUR](https://img.shields.io/aur/version/clickr?logo=archlinux&label=AUR)](https://aur.archlinux.org/packages/clickr)
 [![CI](https://github.com/Wavefire5201/clickr/actions/workflows/ci.yml/badge.svg)](https://github.com/Wavefire5201/clickr/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -22,7 +22,7 @@ Built for Wayland. Works on Hyprland, Sway, GNOME, KDE, X11, and everything else
 ## Install
 
 ```bash
-yay -S clickr-git           # Arch Linux (AUR)
+yay -S clickr               # Arch Linux (AUR), or clickr-git for the latest commit
 cargo install clickr        # crates.io, builds from source
 cargo binstall clickr       # crates.io, downloads the prebuilt binary
 ```
@@ -65,7 +65,7 @@ Packagers: install the binary with normal permissions and let users add themselv
 
 ## Packaging
 
-The `clickr-git` AUR package is maintained by [taxin-404](https://aur.archlinux.org/packages/clickr-git), who packaged clickr before it had a release. Thank you. A stable `clickr` package is planned. Flathub is not: a sandboxed app cannot open `/dev/uinput`. Packaging for another distribution? Open an issue and it will be linked here.
+The [`clickr`](https://aur.archlinux.org/packages/clickr) and [`clickr-git`](https://aur.archlinux.org/packages/clickr-git) AUR packages are maintained by taxin-404, who packaged clickr before it had a release. Thank you. Flathub is not: a sandboxed app cannot open `/dev/uinput`. Packaging for another distribution? Open an issue and it will be linked here.
 
 ## License
 
